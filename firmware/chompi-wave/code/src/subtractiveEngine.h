@@ -12,6 +12,7 @@
 #include "limiter.h"
 #include "reverb.h"
 #include "InterpolatedDelayLine.h"
+#include "SubSynth.h"
 #include <cmath>
 
 #define NUM_VOICES 8
@@ -73,72 +74,8 @@ struct KeyRequest
 
 };
 
-class subtractiveVoice {
-    public:
-
-    subtractiveVoice() {};
-    ~subtractiveVoice() {};
-
-    void Init(float sample_rate, float *filter_lfo_val, float *pitch_lfo_mult) {
-
-        wt.Init(sample_rate);
-
-        amp_env.Init(sample_rate);
-        amp_env.SetSustainLevel(1.f); //This won't change
-
-        cutoff_position = .5f;
-        filter_.Init(sample_rate);
-        filter_.SetControl(.5f);
-        filter_.SetRes(0.f);
-
-        filter_lfo_val_ = filter_lfo_val;
-        pitch_lfo_mult_ = pitch_lfo_mult;
-
-        activeFromUser = false;
-        activeFromSequencer = false;
-    }
-
-    void Process(float *sigl, float *sigr) {
-        
-        wt.setFrequency(frequency * *pitch_lfo_mult_);
-
-        float samp = (wt.PopSample() * .2f * velocity) * amp_env.Process(gate);
-        float templ; // These don't need to be zero initialized because they are
-        float tempr; // directly assigned values, it doesn't matter if they start as garbage data
-
-        //filter LFO value is 0 when toggled off - additive, same math as the old LFO mode
-        filter_.SetControl(cutoff_position + *filter_lfo_val_);
-        
-        filter_.Process(samp, samp, &templ, &tempr);
-        *sigl += templ; // sigl/sigr need to be zero initialized because they are added to, not
-        *sigr += tempr; //assigned a value. They need a starting value or they will be garbage data
-
-        return;
-    }
-
-    void setFrequency(float freq) {
-        wt.setFrequency(freq);
-        frequency = freq;
-    }
-
-    int prioroty;
-    float frequency;
-    int key;
-    float nn;
-    bool gate;
-    float cutoff_position;
-    DjFilter filter_;
-    Adsr amp_env;
-    wavetable wt;
-    bool activeFromUser;
-    bool activeFromSequencer;
-    float velocity = 1.f;
-
-    private:
-    float *filter_lfo_val_;
-    float *pitch_lfo_mult_;
-
-};
+// The WAVE wavetable voice is replaced by the analog-style sub voice in SubSynth.h.
+using subtractiveVoice = subsynth::SubVoice;
 
 class myEngine {
     public:
@@ -151,12 +88,15 @@ class myEngine {
     subtractiveVoice myVoices[NUM_VOICES];
 
     void Init(float sample_rate, InterpolatedDelayLine::AudioSample* del, daisysp::Reverb* reverb, wavetableLoader *wtLoader) {
+        character_ = 1; // GROWL
+        cycle_ = 0;
+        grit_ = 0.f;
+        num_held_ = 0;
         for (int i = 0; i < NUM_VOICES; ++i) {
-            myVoices[i].Init(sample_rate, &filter_lfo_val, &pitch_lfo_mult);
+            myVoices[i].Init(sample_rate, (uint32_t)(i + 1));
             myVoices[i].key = -1;
             myVoices[i].prioroty = i + 1;
-            myVoices[i].wt.wavetableMemory_ = wtLoader->wavetableMemory_;
-            myVoices[i].wt.lastBase_ = wtLoader->wavetableMemory_;
+            myVoices[i].SetCharacter(subsynth::kCharacters[character_], grit_);
         }
 
         filterLfo.Init(sample_rate);
@@ -218,7 +158,10 @@ class myEngine {
     void stopAllVoices() {
         for (size_t i = 0; i < NUM_VOICES; ++i) {
             myVoices[i].gate = false;
+            myVoices[i].activeFromUser = false;
+            myVoices[i].activeFromSequencer = false;
         }
+        num_held_ = 0;
     }
 
     void Process(const float *const *in, float **out, size_t size) {
@@ -233,13 +176,14 @@ class myEngine {
                 ? powf(2.f, pitchLfo.Process() * (2.f / 12.f)) // full depth = +/- 2 semitones
                 : 1.f;
 
-            float sigl = 0.f;
-            float sigr = 0.f;
-                for (int voice = 0; voice < NUM_VOICES; ++voice) {
-                    myVoices[voice].Process(&sigl, &sigr); // Mono for now
-                }
-            out[0][i] = sigl / (float)NUM_VOICES;
-            out[1][i] = sigr / (float)NUM_VOICES;
+            // voices render at 2x and are decimated once on the bus
+            float os[subsynth::kOversample] = {0.f, 0.f};
+            for (int voice = 0; voice < NUM_VOICES; ++voice) {
+                myVoices[voice].Render(os, filter_lfo_val, pitch_lfo_mult);
+            }
+            const float sig = decimator_.Process(os[0], os[1]) * kBusGain;
+            out[0][i] = sig;
+            out[1][i] = sig;
         }
 
         ApplyFX(out[0], out[1], size);
@@ -347,7 +291,7 @@ class myEngine {
         //.5 = no change, 0.f = octave down, 1.f = octave up
         globalFrequency = amount;
         for (int i = 0; i < NUM_VOICES; ++i) {
-            myVoices[i].setFrequency(keyToFrequency(myVoices[i].nn));
+            myVoices[i].SetFrequency(keyToFrequency(myVoices[i].nn));
         }
 
     }
@@ -361,7 +305,7 @@ class myEngine {
             octaveOffset = -1;
         }
         for (int i = 0; i < NUM_VOICES; ++i) {
-            myVoices[i].setFrequency(keyToFrequency(myVoices[i].nn));
+            myVoices[i].SetFrequency(keyToFrequency(myVoices[i].nn));
         }
     }
 
@@ -387,7 +331,7 @@ class myEngine {
             amount = .005;
         }
         for (int i = 0; i < NUM_VOICES; ++i) {
-            myVoices[i].amp_env.SetReleaseTime(amount);
+            myVoices[i].SetRelease(amount);
         }
     }
 
@@ -401,25 +345,41 @@ class myEngine {
         filterLfo.SetFreq(.14f * powf(65.41f / .14f, amount));
     }
 
+    /** WAVE's frame-scan knob (0..32) is the GRIT macro here: drive, fold, detune, post saturation. */
     void setCycle(int8_t direction, bool direct) {
+        int c = direct ? direction : cycle_ + direction;
+        if (c < 0) c = 0;
+        if (c > kGritSteps) c = kGritSteps;
+        cycle_ = c;
+        grit_ = (float)cycle_ / (float)kGritSteps;
         for (size_t i = 0; i < NUM_VOICES; ++i) {
-            myVoices[i].wt.cycleThroughTable(direction, direct);
+            myVoices[i].SetGrit(grit_);
         }
     }
 
     uint8_t getCycle() {
-        return myVoices[0].wt.curCycle;
+        return (uint8_t)cycle_;
     }
 
+    /** WAVE's wavetable select picks one of the seven voice characters. */
     void nextTable(int8_t direction, bool direct) {
-        wtLoader_->selectTable(direction, direct);
+        int c = direct ? direction : character_ + direction;
+        if (c < 0 || c >= subsynth::kNumCharacters) {
+            if (direct) c = 0;
+            else return;
+        }
+        const bool was_mono = subsynth::kCharacters[character_].mono;
+        character_ = c;
+        if (was_mono != subsynth::kCharacters[character_].mono) {
+            stopAllVoices();
+        }
         for (size_t i = 0; i < NUM_VOICES; ++i) {
-            myVoices[i].wt.setTable(wtLoader_->tableBase());
+            myVoices[i].SetCharacter(subsynth::kCharacters[character_], grit_);
         }
     }
 
     int getTable() {
-        return wtLoader_->getIdx();
+        return character_;
     }
 
     void setGain(float amount) {
@@ -527,9 +487,9 @@ class myEngine {
     }
 
     void setMasterCutoff(float amount) {
-        master_cutoff = amount; //Needed??
+        master_cutoff = amount;
         for (int i = 0; i < NUM_VOICES; ++i) {
-            myVoices[i].cutoff_position = amount;
+            myVoices[i].SetCutoffKnob(amount);
         }
     }
 
@@ -537,7 +497,7 @@ class myEngine {
         amount = fclamp(amount, 0.f, .99f); //This has to be limited
         master_resonance = amount;
         for (int i = 0; i < NUM_VOICES; ++i) {
-            myVoices[i].filter_.SetRes(amount);
+            myVoices[i].SetResKnob(amount);
         }
     }
 
@@ -602,6 +562,10 @@ class myEngine {
      *  (gate off, not playing) notes to stealing used notes.
      */
     void StartPlayback(float transpose_nn, int key, float vel, KeyRequest::Source src) {
+        if (subsynth::kCharacters[character_].mono) {
+            StartMono(transpose_nn, key, vel, src);
+            return;
+        }
         // Find if the key is already being played
         int idx = -1;
         for (int i = 0; i < NUM_VOICES; ++i) {
@@ -656,7 +620,12 @@ class myEngine {
 
             // Assign the new note to the selected voice
             if (voiceToSteal != -1) {
-                myVoices[voiceToSteal].setFrequency(keyToFrequency(transpose_nn));
+                if (myVoices[voiceToSteal].gate) {
+                    myVoices[voiceToSteal].Retrigger(); // stolen while held: restart the envelopes
+                }
+                myVoices[voiceToSteal].SetFrequency(keyToFrequency(transpose_nn));
+                myVoices[voiceToSteal].activeFromUser = false;
+                myVoices[voiceToSteal].activeFromSequencer = false;
                 myVoices[voiceToSteal].key = key;
                 myVoices[voiceToSteal].velocity = vel * 0.00787401f; // = vel/127
                 myVoices[voiceToSteal].nn = transpose_nn;
@@ -685,6 +654,10 @@ class myEngine {
      *  go of the physical key doesn't cut off a note if the sequencer is still holding it
      *  and vice versa. */
     void StopPlayback(int key, KeyRequest::Source src) {
+        if (subsynth::kCharacters[character_].mono) {
+            StopMono(key, src);
+            return;
+        }
         for (int i = 0; i < NUM_VOICES; ++i) {
             if (myVoices[i].key == key) {
                 if (src == KeyRequest::Source::USER) {
@@ -699,6 +672,81 @@ class myEngine {
                 break;
             }
         }
+    }
+
+    // ---------------------------------------------------------------- mono / legato
+    // Mono characters play on voice 0 with last-note priority. Held notes are kept on a
+    // small stack so releasing the top note slides back to the one still held.
+
+    struct HeldNote {
+        int key;
+        float nn;
+        float vel;
+        bool user;
+        bool seq;
+    };
+
+    void StartMono(float transpose_nn, int key, float vel, KeyRequest::Source src) {
+        const bool from_user = (src == KeyRequest::Source::USER);
+        HeldNote note = {key, transpose_nn, vel, from_user, !from_user};
+
+        // already held? keep its other source flag, then move it to the top
+        for (int i = 0; i < num_held_; ++i) {
+            if (held_[i].key == key) {
+                note.user = note.user || held_[i].user;
+                note.seq = note.seq || held_[i].seq;
+                RemoveHeld(i);
+                break;
+            }
+        }
+        if (num_held_ >= kMaxHeld) {
+            RemoveHeld(0); // drop the oldest
+        }
+        held_[num_held_++] = note;
+
+        subtractiveVoice &v = myVoices[0];
+        const float hz = keyToFrequency(transpose_nn);
+        const bool legato = v.gate;
+        v.key = key;
+        v.nn = transpose_nn;
+        if (legato) {
+            v.GlideTo(hz); // overlapping notes slide, envelopes keep going
+        }
+        else {
+            v.velocity = vel * 0.00787401f;
+            v.SetFrequency(hz);
+            v.gate = true;
+        }
+    }
+
+    void StopMono(int key, KeyRequest::Source src) {
+        for (int i = 0; i < num_held_; ++i) {
+            if (held_[i].key != key) continue;
+            if (src == KeyRequest::Source::USER) held_[i].user = false;
+            else held_[i].seq = false;
+            if (held_[i].user || held_[i].seq) return; // the other source still holds it
+
+            const bool was_top = (i == num_held_ - 1);
+            RemoveHeld(i);
+            subtractiveVoice &v = myVoices[0];
+            if (num_held_ == 0) {
+                v.gate = false;
+            }
+            else if (was_top) {
+                const HeldNote &prev = held_[num_held_ - 1];
+                v.key = prev.key;
+                v.nn = prev.nn;
+                v.GlideTo(keyToFrequency(prev.nn));
+            }
+            return;
+        }
+    }
+
+    void RemoveHeld(int idx) {
+        for (int j = idx; j < num_held_ - 1; ++j) {
+            held_[j] = held_[j + 1];
+        }
+        --num_held_;
     }
 
     float keyToFrequency(int transpose_nn) {
@@ -747,6 +795,16 @@ class myEngine {
     float gain, gain_target;
     float pan, pan_target;
     uint8_t voice_slot_;
+
+    static constexpr int kGritSteps = 32;
+    static constexpr int kMaxHeld = 16;
+    static constexpr float kBusGain = 0.35f;
+    int character_;
+    int cycle_;
+    float grit_;
+    HeldNote held_[kMaxHeld];
+    int num_held_;
+    subsynth::HalfbandDecimator decimator_;
 
     daisy::FileStreamingManager file_manager;
 
