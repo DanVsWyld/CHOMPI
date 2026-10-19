@@ -235,7 +235,7 @@ struct Character
     float res_scale;               // multiplies the resonance knob
     float post_sat;                // asymmetric saturation after the filter
     float sub_inject;              // clean -1 oct sine added after the filter
-    float glide_s;                 // portamento (mono characters only)
+    float glide_s;                 // portamento: each new note slides in from the last note played
     bool  mono;                    // mono, last-note priority, legato
     bool  phase_reset;             // reset oscillators on a fresh note for a consistent attack
 };
@@ -244,20 +244,20 @@ static constexpr int kNumCharacters = 7;
 
 static const Character kCharacters[kNumCharacters] = {
     //  saw   saw2  pulse pw    det   subSq subSin fold  drive envO  envD  envS  kTrk  resS  post  inj   glide mono   reset
-    // 1 SUB: square into a mostly closed filter plus a -2 oct sine. Heavy, round, still bites when driven.
-    {0.00f, 0.00f, 0.70f, 0.50f, 0.f, 0.80f, 0.70f, 0.00f, 2.0f, 2.0f, 0.18f, 0.25f, 0.30f, 0.60f, 0.25f, 0.60f, 0.045f, true, true},
-    // 2 GROWL: saw + square sub slammed into the ladder, snappy env.
-    {0.90f, 0.00f, 0.00f, 0.50f, 0.f, 0.70f, 0.30f, 0.00f, 4.0f, 3.5f, 0.22f, 0.20f, 0.50f, 0.85f, 0.55f, 0.40f, 0.040f, true, true},
-    // 3 REESE: two detuned saws beating against a solid sine sub.
-    {0.80f, 0.80f, 0.00f, 0.50f, 14.f, 0.00f, 0.60f, 0.00f, 2.6f, 1.5f, 0.60f, 0.50f, 0.40f, 0.50f, 0.45f, 0.55f, 0.060f, true, false},
-    // 4 FOLD: sine/triangle-ish source through a wavefolder - harsh, metallic overtones.
-    {0.00f, 0.00f, 0.30f, 0.50f, 0.f, 0.60f, 0.80f, 0.55f, 1.6f, 2.5f, 0.30f, 0.40f, 0.60f, 0.40f, 0.50f, 0.45f, 0.035f, true, true},
+    // 1 SUB (poly): square into a mostly closed filter plus a -2 oct sine. Heavy, round, still bites when driven.
+    {0.00f, 0.00f, 0.70f, 0.50f, 0.f, 0.80f, 0.70f, 0.00f, 2.0f, 2.0f, 0.18f, 0.25f, 0.30f, 0.60f, 0.25f, 0.60f, 0.015f, false, true},
+    // 2 GROWL (poly): saw + square sub slammed into the ladder, snappy env.
+    {0.90f, 0.00f, 0.00f, 0.50f, 0.f, 0.70f, 0.30f, 0.00f, 4.0f, 3.5f, 0.22f, 0.20f, 0.50f, 0.85f, 0.55f, 0.40f, 0.015f, false, true},
+    // 3 REESE (poly): two detuned saws beating against a solid sine sub.
+    {0.80f, 0.80f, 0.00f, 0.50f, 14.f, 0.00f, 0.60f, 0.00f, 2.6f, 1.5f, 0.60f, 0.50f, 0.40f, 0.50f, 0.45f, 0.55f, 0.020f, false, false},
+    // 4 FOLD (poly): sine/triangle-ish source through a wavefolder - harsh, metallic overtones.
+    {0.00f, 0.00f, 0.30f, 0.50f, 0.f, 0.60f, 0.80f, 0.55f, 1.6f, 2.5f, 0.30f, 0.40f, 0.60f, 0.40f, 0.50f, 0.45f, 0.012f, false, true},
     // 5 PULSE: narrow pulse + square sub, polyphonic for stabs.
-    {0.00f, 0.00f, 0.90f, 0.22f, 0.f, 0.60f, 0.00f, 0.00f, 2.8f, 3.0f, 0.25f, 0.15f, 0.60f, 0.70f, 0.40f, 0.30f, 0.000f, false, false},
+    {0.00f, 0.00f, 0.90f, 0.22f, 0.f, 0.60f, 0.00f, 0.00f, 2.8f, 3.0f, 0.25f, 0.15f, 0.60f, 0.70f, 0.40f, 0.30f, 0.010f, false, false},
     // 6 FAT POLY: detuned saw pair + sub, polyphonic.
-    {0.80f, 0.80f, 0.00f, 0.50f, 9.f, 0.50f, 0.00f, 0.00f, 2.2f, 2.5f, 0.45f, 0.35f, 0.50f, 0.70f, 0.30f, 0.25f, 0.000f, false, false},
-    // 7 ACID: single saw, screaming resonance, big env sweep, slide.
-    {1.00f, 0.00f, 0.00f, 0.50f, 0.f, 0.25f, 0.00f, 0.00f, 3.0f, 5.0f, 0.16f, 0.05f, 0.40f, 1.05f, 0.60f, 0.15f, 0.070f, true, true},
+    {0.80f, 0.80f, 0.00f, 0.50f, 9.f, 0.50f, 0.00f, 0.00f, 2.2f, 2.5f, 0.45f, 0.35f, 0.50f, 0.70f, 0.30f, 0.25f, 0.012f, false, false},
+    // 7 ACID (poly): single saw, screaming resonance, big env sweep, slide.
+    {1.00f, 0.00f, 0.00f, 0.50f, 0.f, 0.25f, 0.00f, 0.00f, 3.0f, 5.0f, 0.16f, 0.05f, 0.40f, 1.05f, 0.60f, 0.15f, 0.025f, false, true},
 };
 
 // ---------------------------------------------------------------- voice

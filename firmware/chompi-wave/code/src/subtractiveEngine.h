@@ -623,7 +623,16 @@ class myEngine {
                 if (myVoices[voiceToSteal].gate) {
                     myVoices[voiceToSteal].Retrigger(); // stolen while held: restart the envelopes
                 }
-                myVoices[voiceToSteal].SetFrequency(keyToFrequency(transpose_nn));
+                // poly portamento: the new voice slides in from the last note played
+                const float hz = keyToFrequency(transpose_nn);
+                if (last_note_hz_ > 0.f && subsynth::kCharacters[character_].glide_s > 0.f) {
+                    myVoices[voiceToSteal].SetFrequency(last_note_hz_);
+                    myVoices[voiceToSteal].GlideTo(hz);
+                }
+                else {
+                    myVoices[voiceToSteal].SetFrequency(hz);
+                }
+                last_note_hz_ = hz;
                 myVoices[voiceToSteal].activeFromUser = false;
                 myVoices[voiceToSteal].activeFromSequencer = false;
                 myVoices[voiceToSteal].key = key;
@@ -804,6 +813,7 @@ class myEngine {
     float grit_;
     HeldNote held_[kMaxHeld];
     int num_held_;
+    float last_note_hz_ = 0.f;
     subsynth::HalfbandDecimator decimator_;
 
     daisy::FileStreamingManager file_manager;

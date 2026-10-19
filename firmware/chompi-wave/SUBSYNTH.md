@@ -22,8 +22,10 @@ Everything below runs at 2x the audio rate (96 kHz). The summed voices go throug
 - After the filter, a clean sine an octave down is added back in so the fundamental
   stays solid when the filter is closed or screaming. Then comes asymmetric tanh
   saturation, which adds even harmonics.
-- Mono characters use last-note priority. Overlapping notes slide (glide) without
-  retriggering. Releasing a note slides back to the one still held.
+- All characters are 8-voice polyphonic, with a short poly portamento (10-25 ms):
+  each new note slides in from the pitch of the last note played. The mono/legato
+  code is still in the engine. Set `mono` to `true` on a character in `SubSynth.h`
+  to bring it back.
 
 ## Controls (same knobs as WAVE, new jobs)
 
@@ -39,13 +41,13 @@ Everything below runs at 2x the audio rate (96 kHz). The summed voices go throug
 
 Characters, in table-slot order:
 
-1. **SUB** (mono): square plus -2 oct sine, mostly closed. Round and heavy.
-2. **GROWL** (mono, default): saw plus square sub slammed into the ladder.
-3. **REESE** (mono): two detuned saws over a sine sub.
-4. **FOLD** (mono): wavefolded sub, metallic and harsh.
-5. **PULSE** (poly): narrow pulse plus square sub, for stabs.
-6. **FAT POLY** (poly): detuned saw pair plus sub.
-7. **ACID** (mono): single saw, high resonance, big env sweep, slide.
+1. **SUB**: square plus -2 oct sine, mostly closed. Round and heavy.
+2. **GROWL** (default): saw plus square sub slammed into the ladder.
+3. **REESE**: two detuned saws over a sine sub.
+4. **FOLD**: wavefolded sub, metallic and harsh.
+5. **PULSE**: narrow pulse plus square sub, for stabs.
+6. **FAT POLY**: detuned saw pair plus sub.
+7. **ACID**: single saw, high resonance, big env sweep.
 
 Presets save GRIT and Character in the slots WAVE used for frame and table. Old WAVE
 presets will load, but they'll land on whatever character matches their table number.
@@ -69,9 +71,10 @@ Desktop audition (no hardware needed): `desktop/build_demo.sh && desktop/render_
 ## Not yet verified on hardware
 
 - **CPU:** a rough count puts 8 voices sounding at once at roughly 40% of the M7,
-  before WAVE's reverb and delay. Mono characters use one voice.
+  before WAVE's reverb and delay. Every character is polyphonic now, so a full
+  8-note chord on any of them is the worst case.
   - If poly chords crackle, lower `NUM_VOICES` in `subtractiveEngine.h`.
   - The commented-out `CpuLoadMeter` in `chompi_main.cpp` will show the real number.
-- **Level:** one mono voice peaks around 5-6x louder than a single WAVE note. The
+- **Level:** one voice peaks around 5-6x louder than a single WAVE note. The
   gain knob and output limiter handle it, but presets made on stock WAVE will sound
   hotter.

@@ -22,6 +22,22 @@ struct MiniEngine
     int ch = 0;
     float grit = 0.f;
     int held[16], nheld = 0;
+    float last_hz = 0.f;
+    void Assign(SubVoice& x, int midi, float vel)
+    {
+        const float hz = Hz(midi);
+        if(last_hz > 0.f && kCharacters[ch].glide_s > 0.f)
+        {
+            x.SetFrequency(last_hz);
+            x.GlideTo(hz);
+        }
+        else
+            x.SetFrequency(hz);
+        last_hz    = hz;
+        x.velocity = vel;
+        x.key      = midi;
+        x.gate     = true;
+    }
 
     void Init()
     {
@@ -75,19 +91,13 @@ struct MiniEngine
             for(auto& x : v)
                 if(!x.gate && !x.amp_env.IsRunning())
                 {
-                    x.SetFrequency(Hz(midi));
-                    x.velocity = vel;
-                    x.key      = midi;
-                    x.gate     = true;
+                    Assign(x, midi, vel);
                     return;
                 }
             for(auto& x : v)
                 if(!x.gate)
                 {
-                    x.SetFrequency(Hz(midi));
-                    x.velocity = vel;
-                    x.key      = midi;
-                    x.gate     = true;
+                    Assign(x, midi, vel);
                     return;
                 }
         }
@@ -195,11 +205,12 @@ int main(int argc, char** argv)
     for(int c = 0; c < kNumCharacters; ++c)
     {
         e.SetChar(c);
-        const auto& evs = kCharacters[c].mono ? riff : stab;
-        // two passes: GRIT 0 then GRIT 1, cutoff swept across each 8-beat pass
+        // two passes: bass riff at low GRIT, then chord stabs at high GRIT,
+        // cutoff swept across each 8-beat pass
         for(int pass = 0; pass < 2; ++pass)
         {
-            e.SetGrit(pass == 0 ? 0.f : 1.f);
+            const auto& evs = pass == 0 ? riff : stab;
+            e.SetGrit(pass == 0 ? 0.2f : 0.8f);
             const int total = (int)(8.f * spb * kSR);
             size_t ei = 0;
             std::vector<Ev> sorted = evs;
@@ -235,7 +246,7 @@ int main(int argc, char** argv)
             // release tail
             for(int i = 0; i < (int)(0.25f * kSR); ++i)
                 audio.push_back(e.Tick(0.f));
-            printf("%-9s grit %d  peak %.3f\n", names[c], pass, cpeak);
+            printf("%-9s %-6s peak %.3f\n", names[c], pass == 0 ? "riff" : "chords", cpeak);
         }
     }
     printf("total %.1f s  peak %.3f  rms %.3f  dc %.5f  nan %ld\n",
