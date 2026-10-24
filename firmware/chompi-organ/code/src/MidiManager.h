@@ -115,11 +115,9 @@ class MidiManager {
                     }
                     else if (cc == 14 || cc == 15)
                     {
+                        // (WAVE ignored CC 14 with the toggle down; here the
+                        // toggle is the rotary switch, so it no longer applies)
                         const uint8_t idx = cc - 14;
-
-                        if (cc == 14 && normal_page_->getSwitchState()) {
-                            break;
-                        }
 
                         const bool last = key_cc[idx];
 

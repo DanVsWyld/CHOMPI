@@ -126,7 +126,7 @@ This folder doesn't carry its own copy of the libraries: the Makefile points at
 `../chompi-wave/code/libs` (and WAVE's bootloader in `../chompi-wave/bin`), so keep the
 WAVE folder alongside it. Put `build/CHOMPI.bin` on the card as the only `.bin` file.
 
-Memory with GCC 10.3.1: 178 KB of 232 KB code space (WAVE uses 204 KB), 149 KB of 280 KB SRAM.
+Memory with GCC 10.3.1: 180 KB of 232 KB code space (WAVE uses 204 KB), 149 KB of 280 KB SRAM.
 
 ## Where things are
 
@@ -165,6 +165,12 @@ cd code/host_test
 g++ -O2 -std=c++14 -I../src organ_render.cpp -o organ_render
 ./organ_render .
 ```
+
+`code/host_test/engine_fuzz.cpp` stress-tests the CHOMPI wrapper (`organEngine.h`) with
+random key traffic from both sources, octave/transpose changes while keys are held,
+out-of-range values and all-notes-off, and fails on stuck notes, held-key bookkeeping
+mismatches or any sample that isn't finite and within ±1. It builds against WAVE's
+libDaisy headers through a one-line stub; see the comment at the top of the file.
 
 ## License
 

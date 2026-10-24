@@ -36,6 +36,7 @@ struct KeyRequest
         START,
         STOP,
         DUMMY,
+        ALL_OFF, // queued by stopAllVoices() so it lands in order with key events
     };
 
     enum class Source
@@ -91,7 +92,8 @@ class myEngine
 
         for(int i = 0; i < kMaxKeyIds; i++)
         {
-            manual_key_[i] = -1;
+            manual_key_[i] = 0;
+            sounding_[i]   = false;
             from_user_[i]  = false;
             from_seq_[i]   = false;
         }
@@ -110,17 +112,6 @@ class myEngine
     /** Once per audio block, before Process() */
     void Prepare()
     {
-        if(all_off_pending_)
-        {
-            all_off_pending_ = false;
-            for(int i = 0; i < kMaxKeyIds; i++)
-            {
-                from_user_[i] = from_seq_[i] = false;
-                ReleaseKey(i);
-            }
-            organ_.AllNotesOff();
-        }
-
         // drain every queued key event so chords land in the same block
         while(!request_fifo.IsEmpty())
         {
@@ -129,6 +120,15 @@ class myEngine
                 StartPlayback(req.transpose_nn_, req.key_, req.src_);
             else if(req.type_ == KeyRequest::Type::STOP)
                 StopPlayback(req.key_, req.src_);
+            else if(req.type_ == KeyRequest::Type::ALL_OFF)
+                AllOff();
+        }
+
+        // fallback for when the queue was full at stopAllVoices()
+        if(all_off_pending_)
+        {
+            all_off_pending_ = false;
+            AllOff();
         }
 
         organ_.UpdateControl();
@@ -171,7 +171,13 @@ class myEngine
         }
     }
 
-    void stopAllVoices() { all_off_pending_ = true; }
+    /** Called from the UI (main loop) and MIDI. Goes through the key queue
+     *  so it is applied in order with key events already waiting. */
+    void stopAllVoices()
+    {
+        if(!request_fifo.PushBack(KeyRequest(KeyRequest::Type::ALL_OFF, 0.f, 0, 0.f)))
+            all_off_pending_ = true;
+    }
 
     /** ------------- organ parameters ------------- */
     void setDrawbar(int idx, int level) { organ_.SetDrawbar(idx, level); }
@@ -262,7 +268,7 @@ class myEngine
 
     bool isKeyPlaying(int key)
     {
-        return key >= 0 && key < kMaxKeyIds && manual_key_[key] >= 0;
+        return key >= 0 && key < kMaxKeyIds && sounding_[key];
     }
 
     float getVUSample() { return output_env_follower.GetLastSamp(); }
@@ -311,11 +317,13 @@ class myEngine
         else
             from_seq_[key] = true;
 
-        if(manual_key_[key] < 0)
+        if(!sounding_[key])
         {
             // remember where it landed so octave/transpose changes while the
-            // key is held still release the right note
-            manual_key_[key] = ManualKey(transpose_nn);
+            // key is held still release the right note. Can be outside 0..60;
+            // the organ folds it onto the manual.
+            manual_key_[key] = (int16_t)ManualKey(transpose_nn);
+            sounding_[key]   = true;
             organ_.NoteOn(manual_key_[key]);
         }
     }
@@ -336,11 +344,21 @@ class myEngine
 
     void ReleaseKey(int key)
     {
-        if(manual_key_[key] >= 0)
+        if(sounding_[key])
         {
             organ_.NoteOff(manual_key_[key]);
-            manual_key_[key] = -1;
+            sounding_[key] = false;
         }
+    }
+
+    void AllOff()
+    {
+        for(int i = 0; i < kMaxKeyIds; i++)
+        {
+            from_user_[i] = from_seq_[i] = false;
+            ReleaseKey(i);
+        }
+        organ_.AllNotesOff();
     }
 
     organ::ToneWheelOrgan organ_;
@@ -349,6 +367,7 @@ class myEngine
     chompi::EnvFollower   output_env_follower;
 
     int16_t manual_key_[kMaxKeyIds];
+    bool    sounding_[kMaxKeyIds];
     bool    from_user_[kMaxKeyIds];
     bool    from_seq_[kMaxKeyIds];
 
