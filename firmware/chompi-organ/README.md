@@ -112,6 +112,12 @@ by octaves. Same in/out channel settings as WAVE (`options.json`).
 | 80–83 | Percussion on / soft / fast / third (≥ 64 = tab down) |
 | 123 | All notes off |
 
+## Installing
+
+Copy the contents of [`../card-profiles/organ-0.1`](../card-profiles/organ-0.1/) to the root
+of a FAT32 microSD card (remove any other `.bin` first), put it in CHOMPI and power on. No
+samples or wavetables are needed; `organ_presets.json` is created on first boot.
+
 ## Building
 
 Same toolchain and steps as the other firmwares (see [`../README.md`](../README.md)), with
